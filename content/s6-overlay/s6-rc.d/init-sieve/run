@@ -1,0 +1,22 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+
+RSPAMD_HOST=${RSPAMD_HOST:-"rspamd-svc"}
+
+echo "Refreshing /data/sieve"
+rm -rf /data/sieve/*
+cp -r /configfiles/sieve/* /data/sieve
+for f in `ls  /data/sieve/*.sieve`; do
+  echo "Compiling sieve file $f"
+  sievec $f
+done
+
+echo "Setting up rspamd_learn_ham.sh and rspamd_learn_spam.sh to use RSPAMD_HOST: $RSPAMD_HOST"
+sed -i -e "s/RSPAMD_HOST/$RSPAMD_HOST/g" /data/sieve/rspamd_learn_ham.sh
+sed -i -e "s/RSPAMD_HOST/$RSPAMD_HOST/g" /data/sieve/rspamd_learn_spam.sh
+
+echo "Changing user:group to vmail:vmail for /data"
+chown -R vmail:vmail /data
+chmod +x /data/sieve/*.svbin
+chmod +x /data/sieve/rspamd_learn_ham.sh
+chmod +x /data/sieve/rspamd_learn_spam.sh

@@ -1,0 +1,14 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+
+echo "Checking for /data/mail"
+#### Create Vmail Dir
+if [ ! -d "/data/mail" ]; then
+	mkdir -p /data/mail
+fi
+
+echo "Checking for /data/sieve"
+#### Create sieve Dir
+if [ ! -d "/data/sieve" ]; then
+	mkdir -p /data/sieve
+fi

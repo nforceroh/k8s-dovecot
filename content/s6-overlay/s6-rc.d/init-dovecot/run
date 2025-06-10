@@ -1,0 +1,106 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+
+### Set Defaults
+POSTMASTER=${POSTMASTER:-"postmaster@example.org"}
+HOSTNAME=${HOSTNAME:-"imap.example.org"}
+LOG_LEVEL=${LOG_LEVEL:-"DEBUG"}
+LOG_PATH=${LOG_PATH:-"/dev/stdout"}
+LOG_DEBUG_PATH=${LOG_DEBUG_PATH:-"/dev/stdout"}
+LOG_INFO_PATH=${LOG_INFO_PATH:-"/dev/stdout"}
+GREETING_TEXT=${GREETING_TEXT:-"Ready"}
+SSL_CRT_FILENAME=${SSL_CRT_FILENAME:-"/etc/dovecot/certs/tls.crt"}
+SSL_KEY_FILENAME=${SSL_KEY_FILENAME:-"/etc/dovecot/certs/tls.key"}
+DH_FILENAME=${DH_FILENAME:-"/etc/postfix/dh4096.pem"}
+SKIP_FTS=${SKIP_FTS:-"n"}
+FTS_HEAP=${FTS_HEAP:-512}
+FTS_PROCS=${FTS_PROCS:-3}
+
+PASS_SCHEME=${PASS_SCHEME:-"SHA512-CRYPT"}
+DEBUG=${DEBUG:-0}
+
+### Config Helper
+function setConf {
+	KEY="$1"
+	VALUE="$2"
+	FILE="$3"
+	echo "Setting conf: $KEY=$VALUE in ($FILE)"
+	sed -i -e "s#^\s*.$KEY\s*=.*\$#$KEY=$VALUE#g" $FILE
+}
+
+### Set Dovecot Config
+setConf "hostname" "$HOSTNAME" /etc/dovecot/conf.d/15-lda.conf
+setConf "postmaster_address" "$POSTMASTER" /etc/dovecot/conf.d/15-lda.conf
+setConf "recipient_delimiter" "+" /etc/dovecot/conf.d/15-lda.conf
+setConf "lda_mailbox_autocreate " "yes" /etc/dovecot/conf.d/15-lda.conf
+setConf "lda_mailbox_autosubscribe " "yes" /etc/dovecot/conf.d/15-lda.conf
+setConf "mail_plugins" "\$mail_plugins sieve" /etc/dovecot/conf.d/15-lda.conf
+
+setConf "mail_plugins" "\$mail_plugins imap_sieve" /etc/dovecot/conf.d/20-imap.conf 
+
+setConf "auth_mechanisms" "plain login cram-md5" /etc/dovecot/conf.d/10-auth.conf 
+setConf "mail_uid" "vmail" /etc/dovecot/conf.d/10-mail.conf
+setConf "mail_gid" "mail" /etc/dovecot/conf.d/10-mail.conf
+
+setConf "default_vsz_limit" "256M" /etc/dovecot/conf.d/10-master.conf
+#### Set Greeting
+setConf "login_greeting" "$GREETING_TEXT" /etc/dovecot/dovecot.conf
+
+#### Set Loglevel Dovecot Loglevel
+setConf "log_path" "$LOG_PATH" /etc/dovecot/conf.d/10-logging.conf
+setConf "debug_log_path" "$LOG_DEBUG_PATH" /etc/dovecot/conf.d/10-logging.conf
+setConf "info_log_path" "$LOG_INFO_PATH" /etc/dovecot/conf.d/10-logging.conf
+
+if [ "${DEBUG}" -gt 0 ]; then
+  ### DEBUGGING
+  setConf "auth_debug_passwords" "yes" /etc/dovecot/conf.d/10-logging.conf
+  setConf "mail_debug" "yes" /etc/dovecot/conf.d/10-logging.conf
+  setConf "auth_debug" "yes" /etc/dovecot/conf.d/10-logging.conf
+  setConf "auth_verbose" "yes" /etc/dovecot/conf.d/10-logging.conf
+else
+  setConf "auth_debug_passwords" "no" /etc/dovecot/conf.d/10-logging.conf
+  setConf "mail_debug" "no" /etc/dovecot/conf.d/10-logging.conf
+  setConf "auth_debug" "no" /etc/dovecot/conf.d/10-logging.conf
+  setConf "auth_verbose" "no" /etc/dovecot/conf.d/10-logging.conf
+fi
+
+
+echo "Setting up /etc/dovecot/dovecot-sql.conf.ext"
+cat <<EOF >/etc/dovecot/dovecot-sql.conf.ext
+driver = mysql
+connect = host=${DB_HOST} port=${DB_PORT} dbname=${DB_NAME} user=${DB_USER} password=${DB_PASS}
+default_pass_scheme = ${PASS_SCHEME}
+password_query = SELECT username AS user, password, homedir AS userdb_home, ${VMAIL_UID} AS userdb_uid, ${VMAIL_GID} AS userdb_gid FROM mailbox WHERE username = '%u'
+iterate_query = SELECT username AS user FROM mailbox
+user_query = SELECT homedir AS home, maildir AS mail, concat('*:bytes=', quota) as quota_rule, ${VMAIL_UID} AS uid, ${VMAIL_GID} AS gid FROM mailbox WHERE username = '%u'
+EOF
+
+echo "Setting new certificate location"
+cat <<EOF > /etc/dovecot/conf.d/10-ssl.conf
+ssl = required
+ssl_cert = <${SSL_CRT_FILENAME}
+ssl_key = <${SSL_KEY_FILENAME}
+ssl_dh = <${DH_FILENAME}
+EOF
+
+if [[ "${SKIP_FTS}" =~ ^([yY][eE][sS]|[yY])+$ ]]; then
+echo -e "\e[33mDetecting SKIP_FTS=y... not enabling Flatcurve (FTS) then...\e[0m"
+echo -n 'quota acl zlib mail_crypt mail_crypt_acl mail_log notify listescape replication lazy_expunge' > /etc/dovecot/mail_plugins
+echo -n 'quota imap_quota imap_acl acl zlib imap_zlib imap_sieve mail_crypt mail_crypt_acl notify listescape replication mail_log' > /etc/dovecot/mail_plugins_imap
+echo -n 'quota sieve acl zlib mail_crypt mail_crypt_acl notify listescape replication' > /etc/dovecot/mail_plugins_lmtp
+else
+echo -e "\e[32mDetecting SKIP_FTS=n... enabling Flatcurve (FTS)\e[0m"
+echo -n 'quota acl zlib mail_crypt mail_crypt_acl mail_log notify fts fts_flatcurve listescape replication lazy_expunge' > /etc/dovecot/mail_plugins
+echo -n 'quota imap_quota imap_acl acl zlib imap_zlib imap_sieve mail_crypt mail_crypt_acl notify mail_log fts fts_flatcurve listescape replication' > /etc/dovecot/mail_plugins_imap
+echo -n 'quota sieve acl zlib mail_crypt mail_crypt_acl fts fts_flatcurve notify listescape replication' > /etc/dovecot/mail_plugins_lmtp
+fi
+
+# Setting variables for indexer-worker inside fts.conf automatically according to mailcow.conf settings
+if [[ "${SKIP_FTS}" =~ ^([nN][oO]|[nN])+$ ]]; then
+  echo -e "\e[94mConfiguring FTS Settings...\e[0m"
+  echo -e "\e[94mSetting FTS Memory Limit (per process) to ${FTS_HEAP} MB\e[0m"
+  sed -i "s/vsz_limit\s*=\s*[0-9]*\s*MB*/vsz_limit=${FTS_HEAP} MB/" /etc/dovecot/conf.d/fts.conf
+  echo -e "\e[94mSetting FTS Process Limit to ${FTS_PROCS}\e[0m"
+  sed -i "s/process_limit\s*=\s*[0-9]*/process_limit=${FTS_PROCS}/" /etc/dovecot/conf.d/fts.conf
+fi
+
