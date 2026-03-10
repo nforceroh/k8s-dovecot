@@ -144,7 +144,7 @@ if [ -n "$DOVEADM_PASSWORD" ]; then
 service doveadm {
   user = vmail
   group = mail
-  inet_listener {
+  inet_listener doveadm {
     port = 3333
   }
 }
@@ -159,7 +159,7 @@ else
 service doveadm {
   user = vmail
   group = mail
-  inet_listener {
+  inet_listener doveadm {
     port = 3333
   }
 }
