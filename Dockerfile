@@ -63,7 +63,7 @@ RUN apk add --no-cache --update \
 	py3-redis \
 	tzdata \
 	wget \
-	nc \
+	netcat-openbsd \
 	dovecot \
 	dovecot-dev \
 	dovecot-lmtpd \

@@ -1,0 +1,52 @@
+name: Update Base Image Digest
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-base-digest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install skopeo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+
+      - name: Resolve latest digest for base image
+        id: digest
+        env:
+          BASE_IMAGE: ghcr.io/nforceroh/k8s-alpine-baseimage:3.23
+        run: |
+          set -euo pipefail
+          DIGEST="$(skopeo inspect --format '{{.Digest}}' "docker://${BASE_IMAGE}")"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Update Dockerfile FROM line
+        env:
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: |
+          set -euo pipefail
+          sed -i -E "s|^FROM ghcr.io/nforceroh/k8s-alpine-baseimage:3\\.23(@sha256:[a-f0-9]{64})?$|FROM ghcr.io/nforceroh/k8s-alpine-baseimage:3.23@${DIGEST}|" Dockerfile
+
+      - name: Create pull request if digest changed
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore: update base image digest"
+          title: "chore: update k8s-alpine-baseimage digest"
+          body: |
+            Updates the pinned digest for:
+            - ghcr.io/nforceroh/k8s-alpine-baseimage:3.23
+
+            This PR was created automatically.
+          branch: chore/update-baseimage-digest
+          delete-branch: true
