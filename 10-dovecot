@@ -1,0 +1,173 @@
+#!/command/with-contenv bash
+
+### Set Defaults
+POSTMASTER=${POSTMASTER:-"postmaster@example.org"}
+HOSTNAME=${HOSTNAME:-"imap.example.org"}
+LOG_LEVEL=${LOG_LEVEL:-"DEBUG"}
+LOG_PATH=${LOG_PATH:-"/dev/stdout"}
+LOG_DEBUG_PATH=${LOG_DEBUG_PATH:-"/dev/stdout"}
+LOG_INFO_PATH=${LOG_INFO_PATH:-"/dev/stdout"}
+GREETING_TEXT=${GREETING_TEXT:-"Ready"}
+SSL_CRT_FILENAME=${SSL_CRT_FILENAME:-"/etc/dovecot/certs/tls.crt"}
+SSL_KEY_FILENAME=${SSL_KEY_FILENAME:-"/etc/dovecot/certs/tls.key"}
+DH_FILENAME=${DH_FILENAME:-"/etc/postfix/dh4096.pem"}
+
+PASS_SCHEME=${PASS_SCHEME:-"SHA512-CRYPT"}
+DEBUG=${DEBUG:-0}
+
+### Config Helper
+function setConf {
+	KEY="$1"
+	VALUE="$2"
+	FILE="$3"
+	echo "Setting conf: $KEY=$VALUE in ($FILE)"
+	sed -i -e "s#^\s*.$KEY\s*=.*\$#$KEY=$VALUE#g" $FILE
+}
+
+#### Create Vmail Dir
+if [ ! -d "/data/mail" ]; then
+	mkdir -p /data/mail
+fi
+
+#### Create Vmail Dir
+if [ ! -d "/data/sieve" ]; then
+	mkdir -p /data/sieve
+fi
+
+echo "Refreshing /data/sieve"
+rm -rf /data/sieve/*
+cp -r /configfiles/sieve/* /data/sieve
+for f in `ls  /data/sieve/*.sieve`; do
+  echo "Compiling sieve file $f"
+  sievec $f
+done
+echo "Changing user:group to vmail:mail for /data"
+chown -R vmail:mail /data
+chmod +x /data/sieve/*.svbin
+sed -i -e "s/RSPAMD_HOST/$RSPAMD_HOST/g" /data/sieve/rspamd_learn_ham.sh
+sed -i -e "s/RSPAMD_HOST/$RSPAMD_HOST/g" /data/sieve/rspamd_learn_spam.sh
+
+setConf "hostname" "$HOSTNAME" /etc/dovecot/conf.d/15-lda.conf
+setConf "postmaster_address" "$POSTMASTER" /etc/dovecot/conf.d/15-lda.conf
+setConf "recipient_delimiter" "+" /etc/dovecot/conf.d/15-lda.conf
+setConf "lda_mailbox_autocreate " "yes" /etc/dovecot/conf.d/15-lda.conf
+setConf "lda_mailbox_autosubscribe " "yes" /etc/dovecot/conf.d/15-lda.conf
+setConf "mail_plugins" "\$mail_plugins sieve" /etc/dovecot/conf.d/15-lda.conf
+
+setConf "mail_plugins" "\$mail_plugins imap_sieve" /etc/dovecot/conf.d/20-imap.conf 
+
+setConf "auth_mechanisms" "plain login cram-md5" /etc/dovecot/conf.d/10-auth.conf 
+setConf "mail_uid" "vmail" /etc/dovecot/conf.d/10-mail.conf
+setConf "mail_gid" "mail" /etc/dovecot/conf.d/10-mail.conf
+
+setConf "default_vsz_limit" "256M" /etc/dovecot/conf.d/10-master.conf
+#### Set Greeting
+setConf "login_greeting" "$GREETING_TEXT" /etc/dovecot/dovecot.conf
+
+#### Set Loglevel Dovecot Loglevel
+setConf "log_path" "$LOG_PATH" /etc/dovecot/conf.d/10-logging.conf
+setConf "debug_log_path" "$LOG_DEBUG_PATH" /etc/dovecot/conf.d/10-logging.conf
+setConf "info_log_path" "$LOG_INFO_PATH" /etc/dovecot/conf.d/10-logging.conf
+
+if [ "${DEBUG}" -gt 0 ]; then
+  ### DEBUGGING
+  setConf "auth_debug_passwords" "yes" /etc/dovecot/conf.d/10-logging.conf
+  setConf "mail_debug" "yes" /etc/dovecot/conf.d/10-logging.conf
+  setConf "auth_debug" "yes" /etc/dovecot/conf.d/10-logging.conf
+  setConf "auth_verbose" "yes" /etc/dovecot/conf.d/10-logging.conf
+else
+  setConf "auth_debug_passwords" "no" /etc/dovecot/conf.d/10-logging.conf
+  setConf "mail_debug" "no" /etc/dovecot/conf.d/10-logging.conf
+  setConf "auth_debug" "no" /etc/dovecot/conf.d/10-logging.conf
+  setConf "auth_verbose" "no" /etc/dovecot/conf.d/10-logging.conf
+fi
+
+#### Turn on SQL auth
+echo "Setting up /etc/dovecot/conf.d/10-auth.conf"
+cat <<EOF > /etc/dovecot/conf.d/10-auth.conf
+auth_mechanisms = plain
+#!include auth-deny.conf.ext
+#!include auth-master.conf.ext
+#!include auth-passwdfile.conf.ext
+!include auth-sql.conf.ext
+#!include auth-ldap.conf.ext
+#!include auth-system.conf.ext
+#!include auth-checkpassword.conf.ext
+#!include auth-vpopmail.conf.ext
+#!include auth-static.conf.ext
+EOF
+
+echo "Setting up /etc/dovecot/dovecot-sql.conf.ext"
+cat <<EOF >/etc/dovecot/dovecot-sql.conf.ext
+driver = mysql
+connect = host=${DB_HOST} port=${DB_PORT} dbname=${DB_NAME} user=${DB_USER} password=${DB_PASS}
+default_pass_scheme = ${PASS_SCHEME}
+password_query = SELECT username AS user, password, homedir AS userdb_home, ${VMAIL_UID} AS userdb_uid, ${VMAIL_GID} AS userdb_gid FROM mailbox WHERE username = '%u'
+iterate_query = SELECT username AS user FROM mailbox
+user_query = SELECT homedir AS home, maildir AS mail, concat('*:bytes=', quota) as quota_rule, ${VMAIL_UID} AS uid, ${VMAIL_GID} AS gid FROM mailbox WHERE username = '%u'
+EOF
+
+echo "Setting /etc/dovecot/conf.d/auth-sql.conf.ext"
+cat <<EOF > /etc/dovecot/conf.d/auth-sql.conf.ext 
+passdb {
+  driver = sql
+  args = /etc/dovecot/dovecot-sql.conf.ext
+}
+userdb {
+  override_fields = mail_home=/data/mail/%d/%n uid=vmail gid=mail mail_location=maildir:~/mail
+  driver = sql
+  args = /etc/dovecot/dovecot-sql.conf.ext
+}
+EOF
+
+echo "Enabling doveadm listener"
+cat <<EOF >/etc/dovecot/conf.d/91-doveadm.conf
+# Create a listener for doveadm-server
+service doveadm {
+  user = vmail
+  group = mail
+  inet_listener {
+    port = 3333
+  }
+}
+doveadm_password = {SSHA512}BQJ4V39+OTGfymFJ7mNRAGrX93Eks1hkZiQqXKc9I54INIVdbpnAPa7KerHK2dOLzTAmiKEBeGk1dKKVRw/4FAHe7qk=
+EOF
+
+echo "Setting new certificate location"
+cat <<EOF > /etc/dovecot/conf.d/10-ssl.conf
+ssl = required
+ssl_cert = <${SSL_CRT_FILENAME}
+ssl_key = <${SSL_KEY_FILENAME}
+ssl_dh = <${DH_FILENAME}
+EOF
+
+echo "Setting lmtp listener"
+cat <<EOF > /etc/dovecot/conf.d/20-lmtp.conf
+service lmtp {
+  inet_listener lmtp {
+     port = 24
+  }
+    
+  unix_listener lmtp {
+    #mode = 0666
+  }
+}
+
+protocol lmtp {
+  mail_plugins = \$mail_plugins sieve
+}
+EOF
+
+echo "Adding auth inet listener"
+cat <<EOF > /etc/dovecot/conf.d/20-auth_inet_listener.conf
+service auth {
+ inet_listener {
+   port = 12345
+ }
+}
+EOF
+
+mkdir -p /tmp/state
+touch /tmp/state/dovecot-init
+
+

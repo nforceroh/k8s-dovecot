@@ -27,6 +27,7 @@ ENV \
 	VMAIL_GID=12 \
   FQDN=mail.example.com \
 	RSPAMD_HOST=rspamd-svc \
+	SKIP_FTS=n \
 	DEBUG=0
 	
 # Create vmail and dovecot users
@@ -44,7 +45,6 @@ RUN apk add --no-cache --update \
 	bash \
 	bind-tools \
 	findutils \
-	envsubst \
 	ca-certificates \
 	curl \
 	coreutils \

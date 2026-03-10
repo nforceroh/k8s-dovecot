@@ -31,12 +31,17 @@ function setConf {
 		return 1
 	fi
 	echo "Setting conf: $KEY=$VALUE in ($FILE)"
-	# Use proper escaping for sed: escape special regex chars in KEY
-	KEY_ESCAPED=$(printf '%s\n' "$KEY" | sed -e 's/[\/&]/\\&/g')
-	sed -i -e "s/^\s*${KEY_ESCAPED}\s*=.*/${KEY_ESCAPED}=${VALUE}/g" "$FILE"
+  # Use | as delimiter to avoid issues with / in values (e.g. /dev/stdout).
+  # Escape | and & in both KEY and VALUE to protect sed metacharacters.
+  KEY_ESCAPED=$(printf '%s\n' "$KEY" | sed -e 's/[|&]/\\&/g')
+  VALUE_ESCAPED=$(printf '%s\n' "$VALUE" | sed -e 's/[|&]/\\&/g')
+  sed -i -e "s|^\s*${KEY_ESCAPED}\s*=.*|${KEY_ESCAPED}=${VALUE_ESCAPED}|g" "$FILE"
 }
 
 ### Set Dovecot Config
+DOVECOT_VER=$(dovecot --version | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+')
+setConf "dovecot_config_version" "$DOVECOT_VER" /etc/dovecot/dovecot.conf
+
 setConf "hostname" "$HOSTNAME" /etc/dovecot/conf.d/15-lda.conf
 setConf "postmaster_address" "$POSTMASTER" /etc/dovecot/conf.d/15-lda.conf
 setConf "recipient_delimiter" "+" /etc/dovecot/conf.d/15-lda.conf
@@ -163,11 +168,11 @@ fi
 
 # Validate dovecot configuration
 echo "Validating Dovecot configuration..."
-if dovecot -c /etc/dovecot/dovecot.conf -t >/dev/null 2>&1; then
+if doveconf -c /etc/dovecot/dovecot.conf >/dev/null 2>&1; then
   echo -e "\e[32m✓ Dovecot configuration is valid\e[0m"
 else
   echo -e "\e[31m✗ Dovecot configuration validation failed\e[0m"
-  dovecot -c /etc/dovecot/dovecot.conf -t || true
+  doveconf -c /etc/dovecot/dovecot.conf || true
   exit 1
 fi
 

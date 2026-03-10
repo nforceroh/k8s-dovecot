@@ -15,9 +15,13 @@ else
 	VERSION := $(BRANCH)
 endif
 
-.PHONY: all build push gitcommit gitpush create
+.PHONY: all build push gitcommit gitpush create test
 all: build push 
 git: gitcommit gitpush 
+
+test:
+	@echo "Running image tests for $(IMG_REPO)/$(IMG_NAME):$(VERSION)"
+	./tests/run_tests.sh $(IMG_REPO)/$(IMG_NAME):$(VERSION)
 
 build: 
 	@echo "Building $(IMG_NAME):$(VERSION) image"
