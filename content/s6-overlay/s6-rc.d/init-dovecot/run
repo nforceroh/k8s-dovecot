@@ -101,9 +101,9 @@ userdb sql {
     uid = vmail
     gid = mail
     mail_home = /data/mail/%{user|domain}/%{user|username}
-    mail_location = maildir:~/mail
+    mail_path = ~/mail
   }
-  userdb_sql_query = SELECT homedir AS home, maildir AS mail, concat('*:bytes=', quota) AS quota_rule, ${VMAIL_UID} AS uid, ${VMAIL_GID} AS gid FROM mailbox WHERE username = '%{user}'
+  userdb_sql_query = SELECT homedir AS home, ${VMAIL_UID} AS uid, ${VMAIL_GID} AS gid, CONCAT(quota, 'B') AS quota_storage_size FROM mailbox WHERE username = '%{user}'
   userdb_sql_iterate_query = SELECT username AS user FROM mailbox
 }
 EOF
