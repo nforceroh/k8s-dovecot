@@ -48,9 +48,9 @@ setConf "postmaster_address" "$POSTMASTER" /etc/dovecot/conf.d/15-lda.conf
 setConf "recipient_delimiter" "+" /etc/dovecot/conf.d/15-lda.conf
 setConf "lda_mailbox_autocreate " "yes" /etc/dovecot/conf.d/15-lda.conf
 setConf "lda_mailbox_autosubscribe " "yes" /etc/dovecot/conf.d/15-lda.conf
-setConf "mail_plugins" "\$mail_plugins sieve" /etc/dovecot/conf.d/15-lda.conf
+setConf "mail_plugins" "sieve" /etc/dovecot/conf.d/15-lda.conf
 
-setConf "mail_plugins" "\$mail_plugins imap_sieve" /etc/dovecot/conf.d/20-imap.conf 
+setConf "mail_plugins" "imap_sieve" /etc/dovecot/conf.d/20-imap.conf 
 
 setConf "auth_mechanisms" "plain login cram-md5" /etc/dovecot/conf.d/10-auth.conf 
 setConf "mail_uid" "vmail" /etc/dovecot/conf.d/10-mail.conf
