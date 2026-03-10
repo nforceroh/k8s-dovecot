@@ -12,6 +12,8 @@ permissions:
 jobs:
   update-base-digest:
     runs-on: ubuntu-latest
+    env:
+      BASE_IMAGE: ghcr.io/nforceroh/k8s-alpine-baseimage:3.23
 
     steps:
       - name: Checkout
@@ -24,11 +26,16 @@ jobs:
 
       - name: Resolve latest digest for base image
         id: digest
-        env:
-          BASE_IMAGE: ghcr.io/nforceroh/k8s-alpine-baseimage:3.23
         run: |
           set -euo pipefail
-          DIGEST="$(skopeo inspect --format '{{.Digest}}' "docker://${BASE_IMAGE}")"
+
+          # Use credentials when available (private GHCR), otherwise fallback to anonymous.
+          if [ -n "${{ secrets.GITHUB_TOKEN }}" ]; then
+            DIGEST="$(skopeo inspect --creds "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" --format '{{.Digest}}' "docker://${BASE_IMAGE}")"
+          else
+            DIGEST="$(skopeo inspect --format '{{.Digest}}' "docker://${BASE_IMAGE}")"
+          fi
+
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
 
       - name: Update Dockerfile FROM line
@@ -36,7 +43,14 @@ jobs:
           DIGEST: ${{ steps.digest.outputs.digest }}
         run: |
           set -euo pipefail
-          sed -i -E "s|^FROM ghcr.io/nforceroh/k8s-alpine-baseimage:3\\.23(@sha256:[a-f0-9]{64})?$|FROM ghcr.io/nforceroh/k8s-alpine-baseimage:3.23@${DIGEST}|" Dockerfile
+
+          BASE_IMAGE_RE='ghcr\.io/nforceroh/k8s-alpine-baseimage:3\.23(@sha256:[a-f0-9]{64})?'
+          sed -i -E "s|^FROM[[:space:]]+${BASE_IMAGE_RE}$|FROM ${BASE_IMAGE}@${DIGEST}|" Dockerfile
+
+          if ! grep -Eq "^FROM[[:space:]]+${BASE_IMAGE}@${DIGEST}$" Dockerfile; then
+            echo "Failed to update Dockerfile FROM line"
+            exit 1
+          fi
 
       - name: Create pull request if digest changed
         uses: peter-evans/create-pull-request@v7
