@@ -20,8 +20,8 @@ for script in /data/sieve/rspamd_learn_ham.sh /data/sieve/rspamd_learn_spam.sh; 
   [ -f "$script" ] && sed -i "s|RSPAMD_HOST|${RSPAMD_HOST}|g" "$script"
 done
 
-echo "Changing user:group to vmail:mail for /data"
-chown -R vmail:mail /data
+echo "Changing user:group to vmail:mail for /data/sieve"
+chown -R vmail:mail /data/sieve
 
 echo "Making sieve binaries and scripts executable"
 find /data/sieve -name "*.svbin" -exec chmod +x {} \;
