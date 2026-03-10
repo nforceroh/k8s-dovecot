@@ -1,4 +1,4 @@
-FROM ghcr.io/nforceroh/k8s-alpine-baseimage:3.23
+FROM ghcr.io/nforceroh/k8s-alpine-baseimage:3.23@sha256:1976b5f0035c3acee4396f3091003001d03c57fcc669f1e0c2f67b8cc1a6d6a1
 
 ARG \
   BUILD_DATE=unknown \
