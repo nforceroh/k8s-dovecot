@@ -1,5 +1,6 @@
 #!/usr/bin/with-contenv bash
 # shellcheck shell=bash
+set -e
 
 ### Set Defaults
 POSTMASTER=${POSTMASTER:-"postmaster@example.org"}
@@ -15,17 +16,24 @@ DH_FILENAME=${DH_FILENAME:-"/etc/postfix/dh4096.pem"}
 SKIP_FTS=${SKIP_FTS:-"n"}
 FTS_HEAP=${FTS_HEAP:-512}
 FTS_PROCS=${FTS_PROCS:-3}
+DOVEADM_PASSWORD=${DOVEADM_PASSWORD:-""}
 
 PASS_SCHEME=${PASS_SCHEME:-"SHA512-CRYPT"}
 DEBUG=${DEBUG:-0}
 
-### Config Helper
+### Config Helper - Fixed sed pattern to properly match config keys
 function setConf {
 	KEY="$1"
 	VALUE="$2"
 	FILE="$3"
+	if [ -z "$KEY" ] || [ -z "$FILE" ]; then
+		echo "Error: setConf requires KEY, VALUE, and FILE arguments"
+		return 1
+	fi
 	echo "Setting conf: $KEY=$VALUE in ($FILE)"
-	sed -i -e "s#^\s*.$KEY\s*=.*\$#$KEY=$VALUE#g" $FILE
+	# Use proper escaping for sed: escape special regex chars in KEY
+	KEY_ESCAPED=$(printf '%s\n' "$KEY" | sed -e 's/[\/&]/\\&/g')
+	sed -i -e "s/^\s*${KEY_ESCAPED}\s*=.*/${KEY_ESCAPED}=${VALUE}/g" "$FILE"
 }
 
 ### Set Dovecot Config
@@ -74,14 +82,63 @@ password_query = SELECT username AS user, password, homedir AS userdb_home, ${VM
 iterate_query = SELECT username AS user FROM mailbox
 user_query = SELECT homedir AS home, maildir AS mail, concat('*:bytes=', quota) as quota_rule, ${VMAIL_UID} AS uid, ${VMAIL_GID} AS gid FROM mailbox WHERE username = '%u'
 EOF
+# Secure the SQL config with database credentials
+chmod 600 /etc/dovecot/dovecot-sql.conf.ext
 
 echo "Setting new certificate location"
+# Validate SSL certificate files exist before configuring
+if [ ! -f "$SSL_CRT_FILENAME" ]; then
+  echo "ERROR: SSL certificate not found at $SSL_CRT_FILENAME"
+  echo "Please mount or create certificate at this location"
+  exit 1
+fi
+if [ ! -f "$SSL_KEY_FILENAME" ]; then
+  echo "ERROR: SSL key not found at $SSL_KEY_FILENAME"
+  echo "Please mount or create key at this location"
+  exit 1
+fi
+if [ ! -f "$DH_FILENAME" ]; then
+  echo "WARNING: DH parameters file not found at $DH_FILENAME"
+  echo "This is optional but recommended for perfect forward secrecy"
+fi
+
 cat <<EOF > /etc/dovecot/conf.d/10-ssl.conf
 ssl = required
 ssl_cert = <${SSL_CRT_FILENAME}
 ssl_key = <${SSL_KEY_FILENAME}
 ssl_dh = <${DH_FILENAME}
 EOF
+chmod 600 /etc/dovecot/conf.d/10-ssl.conf
+
+echo "Configuring doveadm admin interface"
+if [ -n "$DOVEADM_PASSWORD" ]; then
+  echo "Using DOVEADM_PASSWORD from environment variable"
+  cat <<EOF > /etc/dovecot/conf.d/91-doveadm.conf
+# Create a listener for doveadm-server
+service doveadm {
+  user = vmail
+  group = mail
+  inet_listener {
+    port = 3333
+  }
+}
+doveadm_password = ${DOVEADM_PASSWORD}
+EOF
+  chmod 600 /etc/dovecot/conf.d/91-doveadm.conf
+else
+  echo "Warning: DOVEADM_PASSWORD not set - doveadm admin interface will be disabled"
+  echo "To enable, set DOVEADM_PASSWORD environment variable"
+  cat <<EOF > /etc/dovecot/conf.d/91-doveadm.conf
+# doveadm admin interface disabled - DOVEADM_PASSWORD not configured
+service doveadm {
+  user = vmail
+  group = mail
+  inet_listener {
+    port = 3333
+  }
+}
+EOF
+fi
 
 if [[ "${SKIP_FTS}" =~ ^([yY][eE][sS]|[yY])+$ ]]; then
 echo -e "\e[33mDetecting SKIP_FTS=y... not enabling Flatcurve (FTS) then...\e[0m"
@@ -104,3 +161,14 @@ if [[ "${SKIP_FTS}" =~ ^([nN][oO]|[nN])+$ ]]; then
   sed -i "s/process_limit\s*=\s*[0-9]*/process_limit=${FTS_PROCS}/" /etc/dovecot/conf.d/fts.conf
 fi
 
+# Validate dovecot configuration
+echo "Validating Dovecot configuration..."
+if dovecot -c /etc/dovecot/dovecot.conf -t >/dev/null 2>&1; then
+  echo -e "\e[32m✓ Dovecot configuration is valid\e[0m"
+else
+  echo -e "\e[31m✗ Dovecot configuration validation failed\e[0m"
+  dovecot -c /etc/dovecot/dovecot.conf -t || true
+  exit 1
+fi
+
+echo -e "\e[32m[OK] Dovecot initialization complete\e[0m"

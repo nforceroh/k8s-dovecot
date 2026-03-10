@@ -1,22 +1,30 @@
 #!/usr/bin/with-contenv bash
 # shellcheck shell=bash
+set -e
 
 RSPAMD_HOST=${RSPAMD_HOST:-"rspamd-svc"}
 
 echo "Refreshing /data/sieve"
 rm -rf /data/sieve/*
 cp -r /configfiles/sieve/* /data/sieve
-for f in `ls  /data/sieve/*.sieve`; do
+
+echo "Compiling sieve files"
+for f in /data/sieve/*.sieve; do
+  [ -f "$f" ] || continue  # Skip if file doesn't exist
   echo "Compiling sieve file $f"
-  sievec $f
+  sievec "$f" || echo "Warning: Failed to compile $f"
 done
 
 echo "Setting up rspamd_learn_ham.sh and rspamd_learn_spam.sh to use RSPAMD_HOST: $RSPAMD_HOST"
-sed -i -e "s/RSPAMD_HOST/$RSPAMD_HOST/g" /data/sieve/rspamd_learn_ham.sh
-sed -i -e "s/RSPAMD_HOST/$RSPAMD_HOST/g" /data/sieve/rspamd_learn_spam.sh
+for script in /data/sieve/rspamd_learn_ham.sh /data/sieve/rspamd_learn_spam.sh; do
+  [ -f "$script" ] && sed -i "s|RSPAMD_HOST|${RSPAMD_HOST}|g" "$script"
+done
 
 echo "Changing user:group to vmail:vmail for /data"
 chown -R vmail:vmail /data
-chmod +x /data/sieve/*.svbin
-chmod +x /data/sieve/rspamd_learn_ham.sh
-chmod +x /data/sieve/rspamd_learn_spam.sh
+
+echo "Making sieve binaries and scripts executable"
+find /data/sieve -name "*.svbin" -exec chmod +x {} \;
+find /data/sieve -name "*.sh" -exec chmod +x {} \;
+
+echo "Sieve initialization complete"
