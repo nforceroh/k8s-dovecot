@@ -1,3 +1,5 @@
+sql_driver = mysql
+
 mysql maildb {
   host = mariadb
   port = 3306

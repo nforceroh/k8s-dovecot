@@ -81,6 +81,8 @@ fi
 
 echo "Setting up /etc/dovecot/conf.d/auth-sql.conf.ext"
 cat <<EOF >/etc/dovecot/conf.d/auth-sql.conf.ext
+sql_driver = mysql
+
 mysql maildb {
   host = ${DB_HOST}
   port = ${DB_PORT}
