@@ -223,7 +223,7 @@ dovecot_out=$(docker run --rm \
    && echo PASS" 2>&1)
 
 if echo "$dovecot_out" | grep -q "^PASS$"; then
-  pass "init-dovecot: exits 0 (including dovecot -t validation)"
+  pass "init-dovecot: exits 0 (including doveconf validation)"
 else
   fail "init-dovecot: non-zero exit"
   echo "--- init-dovecot output (last 30 lines) ---"
@@ -239,12 +239,11 @@ generated=$(docker run --rm \
   -c "bash /etc/s6-overlay/s6-rc.d/init-vmail/run 2>/dev/null \
    && bash /etc/s6-overlay/s6-rc.d/init-sieve/run 2>/dev/null \
    && bash /etc/s6-overlay/s6-rc.d/init-dovecot/run 2>/dev/null; \
-   echo '---sql---'; cat /etc/dovecot/dovecot-sql.conf.ext; \
+  echo '---authsql---'; cat /etc/dovecot/conf.d/auth-sql.conf.ext; \
    echo '---lda---'; cat /etc/dovecot/conf.d/15-lda.conf; \
    echo '---doveadm---'; cat /etc/dovecot/conf.d/91-doveadm.conf; \
    echo '---dovecot---'; cat /etc/dovecot/dovecot.conf; \
-   echo '---ssl---'; cat /etc/dovecot/conf.d/10-ssl.conf; \
-   echo '---authsql---'; cat /etc/dovecot/conf.d/auth-sql.conf.ext" 2>/dev/null)
+  echo '---ssl---'; cat /etc/dovecot/conf.d/10-ssl.conf" 2>/dev/null)
 
 check_conf() {
   local desc="$1" pattern="$2"
@@ -255,15 +254,16 @@ check_conf() {
   fi
 }
 
-# dovecot-sql.conf.ext
-check_conf "sql driver=mysql"             "driver = mysql"
-check_conf "sql DB host"                  "host=dbhost.test"
-check_conf "sql DB port"                  "port=3307"
-check_conf "sql DB name"                  "dbname=testmail"
-check_conf "sql DB user"                  "user=testuser"
-check_conf "sql pass_scheme"              "default_pass_scheme = SHA512-CRYPT"
-check_conf "sql password_query present"   "password_query ="
-check_conf "sql user_query present"       "user_query ="
+# auth-sql.conf.ext
+check_conf "sql driver block mysql maildb" "^mysql maildb [{]"
+check_conf "sql DB host"                   "host = dbhost.test"
+check_conf "sql DB port"                   "port = 3307"
+check_conf "sql DB name"                   "dbname = testmail"
+check_conf "sql DB user"                   "user = testuser"
+check_conf "sql pass_scheme"               "passdb_default_password_scheme = SHA512-CRYPT"
+check_conf "sql passdb query present"      "passdb_sql_query ="
+check_conf "sql userdb query present"      "userdb_sql_query ="
+check_conf "sql userdb iterate present"    "userdb_sql_iterate_query ="
 
 # 15-lda.conf
 check_conf "lda hostname"                 "hostname=imap.test.example.com"
@@ -279,14 +279,16 @@ check_conf "doveadm password set"         "doveadm_password = test-doveadm-secre
 
 # dovecot.conf
 check_conf "login_greeting set"           "login_greeting=Ready"
+check_conf "dovecot_config_version set"   "dovecot_config_version=2\.4\.2"
+check_conf "dovecot_storage_version set"  "dovecot_storage_version=2\.4\.2"
 
 # 10-ssl.conf
 check_conf "ssl=required"                 "ssl = required"
-check_conf "ssl_cert path"                "ssl_cert = </etc/dovecot/certs/tls.crt"
-check_conf "ssl_key path"                 "ssl_key = </etc/dovecot/certs/tls.key"
+check_conf "ssl_server_cert_file path"    "ssl_server_cert_file = /etc/dovecot/certs/tls.crt"
+check_conf "ssl_server_key_file path"     "ssl_server_key_file = /etc/dovecot/certs/tls.key"
 
 # auth-sql.conf.ext — group must be 'mail' not 'vmail'
-check_conf "auth-sql gid=mail (not gid=vmail)" "gid=mail"
+check_conf "auth-sql gid=mail (not gid=vmail)" "gid = mail"
 if echo "$generated" | grep -q "gid=vmail"; then
   fail "auth-sql: gid=vmail found (should be gid=mail)"
 else

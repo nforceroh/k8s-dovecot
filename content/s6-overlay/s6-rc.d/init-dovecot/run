@@ -41,6 +41,7 @@ function setConf {
 ### Set Dovecot Config
 DOVECOT_VER=$(dovecot --version | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+')
 setConf "dovecot_config_version" "$DOVECOT_VER" /etc/dovecot/dovecot.conf
+setConf "dovecot_storage_version" "$DOVECOT_VER" /etc/dovecot/dovecot.conf
 
 setConf "hostname" "$HOSTNAME" /etc/dovecot/conf.d/15-lda.conf
 setConf "postmaster_address" "$POSTMASTER" /etc/dovecot/conf.d/15-lda.conf
@@ -78,17 +79,34 @@ else
 fi
 
 
-echo "Setting up /etc/dovecot/dovecot-sql.conf.ext"
-cat <<EOF >/etc/dovecot/dovecot-sql.conf.ext
-driver = mysql
-connect = host=${DB_HOST} port=${DB_PORT} dbname=${DB_NAME} user=${DB_USER} password=${DB_PASS}
-default_pass_scheme = ${PASS_SCHEME}
-password_query = SELECT username AS user, password, homedir AS userdb_home, ${VMAIL_UID} AS userdb_uid, ${VMAIL_GID} AS userdb_gid FROM mailbox WHERE username = '%u'
-iterate_query = SELECT username AS user FROM mailbox
-user_query = SELECT homedir AS home, maildir AS mail, concat('*:bytes=', quota) as quota_rule, ${VMAIL_UID} AS uid, ${VMAIL_GID} AS gid FROM mailbox WHERE username = '%u'
+echo "Setting up /etc/dovecot/conf.d/auth-sql.conf.ext"
+cat <<EOF >/etc/dovecot/conf.d/auth-sql.conf.ext
+mysql maildb {
+  host = ${DB_HOST}
+  port = ${DB_PORT}
+  dbname = ${DB_NAME}
+  user = ${DB_USER}
+  password = ${DB_PASS}
+}
+
+passdb sql {
+  passdb_default_password_scheme = ${PASS_SCHEME}
+  passdb_sql_query = SELECT username AS user, password, homedir AS userdb_home, ${VMAIL_UID} AS userdb_uid, ${VMAIL_GID} AS userdb_gid FROM mailbox WHERE username = '%{user}'
+}
+
+userdb sql {
+  fields {
+    uid = vmail
+    gid = mail
+    mail_home = /data/mail/%{user|domain}/%{user|username}
+    mail_location = maildir:~/mail
+  }
+  userdb_sql_query = SELECT homedir AS home, maildir AS mail, concat('*:bytes=', quota) AS quota_rule, ${VMAIL_UID} AS uid, ${VMAIL_GID} AS gid FROM mailbox WHERE username = '%{user}'
+  userdb_sql_iterate_query = SELECT username AS user FROM mailbox
+}
 EOF
-# Secure the SQL config with database credentials
-chmod 600 /etc/dovecot/dovecot-sql.conf.ext
+# Secure SQL auth config with database credentials
+chmod 600 /etc/dovecot/conf.d/auth-sql.conf.ext
 
 echo "Setting new certificate location"
 # Validate SSL certificate files exist before configuring
@@ -109,10 +127,13 @@ fi
 
 cat <<EOF > /etc/dovecot/conf.d/10-ssl.conf
 ssl = required
-ssl_cert = <${SSL_CRT_FILENAME}
-ssl_key = <${SSL_KEY_FILENAME}
-ssl_dh = <${DH_FILENAME}
+ssl_server_cert_file = ${SSL_CRT_FILENAME}
+ssl_server_key_file = ${SSL_KEY_FILENAME}
 EOF
+
+if [ -f "$DH_FILENAME" ]; then
+  echo "ssl_server_dh_file = ${DH_FILENAME}" >> /etc/dovecot/conf.d/10-ssl.conf
+fi
 chmod 600 /etc/dovecot/conf.d/10-ssl.conf
 
 echo "Configuring doveadm admin interface"

@@ -1,9 +1,23 @@
-passdb {
-  driver = sql
-  args = /etc/dovecot/dovecot-sql.conf.ext
+mysql maildb {
+  host = mariadb
+  port = 3306
+  dbname = mail
+  user = user
+  password = password
 }
-userdb {
-  override_fields = mail_home=/data/mail/%d/%n uid=vmail gid=mail mail_location=maildir:~/mail
-  driver = sql
-  args = /etc/dovecot/dovecot-sql.conf.ext
+
+passdb sql {
+  passdb_default_password_scheme = SHA512-CRYPT
+  passdb_sql_query = SELECT username AS user, password, homedir AS userdb_home, 5000 AS userdb_uid, 12 AS userdb_gid FROM mailbox WHERE username = '%{user}'
+}
+
+userdb sql {
+  fields {
+    uid = vmail
+    gid = mail
+    mail_home = /data/mail/%{user|domain}/%{user|username}
+    mail_location = maildir:~/mail
+  }
+  userdb_sql_query = SELECT homedir AS home, maildir AS mail, concat('*:bytes=', quota) AS quota_rule, 5000 AS uid, 12 AS gid FROM mailbox WHERE username = '%{user}'
+  userdb_sql_iterate_query = SELECT username AS user FROM mailbox
 }
